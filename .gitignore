@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+# Local environment files
+.env
+src/module/Threshold-Based Clinical Alert Database/.env
+
+# Virtual environments
+venv/

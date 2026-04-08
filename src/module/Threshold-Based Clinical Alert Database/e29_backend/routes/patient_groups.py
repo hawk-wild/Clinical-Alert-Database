@@ -27,7 +27,10 @@ def create_patient_group(payload: PatientGroupCreate) -> dict:
     if patient_groups_collection().find_one({"group_id": payload.group_id}):
         raise HTTPException(status_code=409, detail="group_id already exists")
     patient_groups_collection().insert_one(payload.model_dump())
-    return serialize_doc(patient_groups_collection().find_one({"group_id": payload.group_id}))
+    created = patient_groups_collection().find_one({"group_id": payload.group_id})
+    if not created:
+        raise HTTPException(status_code=500, detail="Patient-group creation verification failed")
+    return serialize_doc(created)
 
 
 @router.put("/patient-groups/{group_id}")
@@ -36,7 +39,10 @@ def update_patient_group(group_id: str, payload: PatientGroupCreate) -> dict:
     if not existing:
         raise HTTPException(status_code=404, detail="Patient-group not found")
     patient_groups_collection().update_one({"group_id": group_id}, {"$set": payload.model_dump()})
-    return serialize_doc(patient_groups_collection().find_one({"group_id": payload.group_id}))
+    updated = patient_groups_collection().find_one({"group_id": payload.group_id})
+    if not updated:
+        raise HTTPException(status_code=500, detail="Patient-group update verification failed")
+    return serialize_doc(updated)
 
 
 @router.delete("/patient-groups/{group_id}")

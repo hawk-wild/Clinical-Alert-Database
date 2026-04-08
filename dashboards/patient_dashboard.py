@@ -1,7 +1,185 @@
 # dashboards/patient_dashboard.py
+import os
+from datetime import datetime
+from urllib import error, request
+import json
+
 import streamlit as st
 from components.sidebar import sidebar
 from components.charts import patient_line_chart, appointment_donut_chart
+
+
+E29_API_BASE = os.getenv("E29_API_BASE", "http://127.0.0.1:8092/api/e29")
+
+
+def _api_get(path):
+    try:
+        with request.urlopen(f"{E29_API_BASE}{path}", timeout=8) as response:
+            return json.loads(response.read().decode("utf-8")), None
+    except error.URLError as exc:
+        return None, str(exc)
+
+
+def _api_post(path, payload):
+    body = json.dumps(payload).encode("utf-8")
+    req = request.Request(
+        f"{E29_API_BASE}{path}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8")), None
+    except error.HTTPError as exc:
+        details = exc.read().decode("utf-8")
+        return None, details
+    except error.URLError as exc:
+        return None, str(exc)
+
+
+def show_e5_sarah_module(module_name, module_desc):
+    st.markdown(f"# {module_name}")
+    st.markdown(f"*{module_desc}*")
+    st.caption("Patient Interface: Single-patient view for Sarah")
+    st.divider()
+
+    sarah = {
+        "name": "Sarah Johnson",
+        "age_months": 300,
+        "condition_tag": "Hypertension",
+        "parameter_name": "Systolic_BP",
+    }
+
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Patient", sarah["name"])
+    p2.metric("Age (months)", sarah["age_months"])
+    p3.metric("Condition", sarah["condition_tag"])
+
+    st.divider()
+    st.subheader("Live Clinical Check")
+
+    observed_value = st.slider(
+        "Current Systolic BP",
+        min_value=70,
+        max_value=220,
+        value=155,
+        step=1,
+    )
+
+    if st.button("Run Live Check for Sarah", use_container_width=True):
+        result, err = _api_post(
+            "/ingestion/evaluate",
+            {
+                "parameter_name": sarah["parameter_name"],
+                "observed_value": observed_value,
+                "age_in_months": sarah["age_months"],
+                "condition_tag": sarah["condition_tag"],
+                "baseline_value": 132,
+                "trend_window": [130, 136, 141],
+            },
+        )
+        if err:
+            st.error(f"Live check failed: {err}")
+        else:
+            compliance_data = result.get("compliance") if isinstance(result, dict) else None
+            violation_status = compliance_data.get("violation_status") if isinstance(compliance_data, dict) else None
+            if violation_status == "Violation":
+                st.error("Alert generated for Sarah: threshold violation detected")
+            elif violation_status == "Within Limit":
+                st.success("Sarah is currently within threshold limits")
+            else:
+                st.warning("Live check completed, but status was not available in response.")
+
+    thresholds, th_err = _api_get("/thresholds")
+    compliances, cmp_err = _api_get("/compliance")
+    escalations, esc_err = _api_get("/escalation-paths")
+    reports, rep_err = _api_get("/reports/compliance-summary")
+
+    if th_err or cmp_err or esc_err or rep_err:
+        st.warning("Some backend endpoints were unreachable. Ensure E-29 API is running on port 8092.")
+
+    threshold = None
+    escalation = None
+    sarah_compliances = []
+
+    if isinstance(thresholds, list):
+        for item in thresholds:
+            if item.get("parameter_name") == sarah["parameter_name"] and item.get("group_id") == "PG001":
+                threshold = item
+                break
+
+    if isinstance(escalations, list) and threshold:
+        for item in escalations:
+            if item.get("threshold_id") == threshold.get("threshold_id"):
+                escalation = item
+                break
+
+    if isinstance(compliances, list) and threshold:
+        sarah_compliances = [
+            item for item in compliances if item.get("threshold_id") == threshold.get("threshold_id")
+        ]
+
+    st.divider()
+    st.subheader("Sarah's Threshold Details")
+    if threshold:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Threshold ID", threshold.get("threshold_id", "-"))
+        c2.metric("Parameter", threshold.get("parameter_name", "-"))
+        c3.metric("Min", threshold.get("min_value", "-"))
+        c4.metric("Max", threshold.get("max_value", "-"))
+    else:
+        st.info("No threshold mapping found for Sarah.")
+
+    st.subheader("Escalation Path")
+    if escalation:
+        ec1, ec2, ec3 = st.columns(3)
+        ec1.metric("Primary Role", escalation.get("primary_role", "-"))
+        ec2.metric("Secondary Role", escalation.get("secondary_role", "-"))
+        ec3.metric("Response Time (min)", escalation.get("response_time_limit", "-"))
+        st.caption(f"Pathway: {escalation.get('pathway_name', '-')}")
+    else:
+        st.info("No escalation path linked for this threshold.")
+
+    st.subheader("Recent Compliance for Sarah")
+    if sarah_compliances:
+        latest = sarah_compliances[0]
+        status = latest.get("violation_status", "-")
+        lc1, lc2, lc3 = st.columns(3)
+        lc1.metric("Latest Status", status)
+        lc2.metric("Observed Value", latest.get("observed_value", "-"))
+        lc3.metric("Total Checks", len(sarah_compliances))
+
+        table_rows = []
+        for item in sarah_compliances[:8]:
+            timestamp = item.get("check_timestamp", "")
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                pass
+            table_rows.append(
+                {
+                    "Compliance ID": item.get("compliance_id", "-"),
+                    "Observed": item.get("observed_value", "-"),
+                    "Status": item.get("violation_status", "-"),
+                    "Timestamp": timestamp,
+                }
+            )
+        st.table(table_rows)
+    else:
+        st.info("No compliance records available yet.")
+
+    st.subheader("Module-Level Compliance Snapshot")
+    if isinstance(reports, dict):
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Total Checks", reports.get("total_checks", 0))
+        r2.metric("Violations", reports.get("violations", 0))
+        r3.metric("Violation Rate", f"{reports.get('violation_rate', 0)}%")
+
+    st.divider()
+    if st.button("⬅ Back to Modules"):
+        st.session_state.view = "category"
+        st.rerun()
 
 # All categories and their modules
 CATEGORIES = {
@@ -133,6 +311,7 @@ def patient_dashboard():
     st.session_state.setdefault("view", "main")
     st.session_state.setdefault("selected_category", None)
     st.session_state.setdefault("selected_module", None)
+    st.session_state.setdefault("sidebar_selected", "Dashboard")
 
     # Sidebar
     selected = sidebar([
@@ -148,15 +327,17 @@ def patient_dashboard():
         "I - Integrated Capstone Projects"
     ])
 
-    # Handle sidebar selection
-    if selected != "Dashboard" and selected in CATEGORIES:
-        st.session_state.selected_category = selected
-        st.session_state.view = "category"
-        st.session_state.selected_module = None
-    elif selected == "Dashboard":
-        st.session_state.view = "main"
-        st.session_state.selected_category = None
-        st.session_state.selected_module = None
+    # Handle sidebar selection only when it changes, otherwise preserve current module view.
+    if selected != st.session_state.sidebar_selected:
+        st.session_state.sidebar_selected = selected
+        if selected != "Dashboard" and selected in CATEGORIES:
+            st.session_state.selected_category = selected
+            st.session_state.view = "category"
+            st.session_state.selected_module = None
+        elif selected == "Dashboard":
+            st.session_state.view = "main"
+            st.session_state.selected_category = None
+            st.session_state.selected_module = None
 
     # ROUTER
     if st.session_state.view == "category":
@@ -360,6 +541,10 @@ def show_category_view():
 def show_module_detail():
     code, name, desc, tables, records = st.session_state.selected_module
     cat_key = st.session_state.selected_category
+
+    if code == "E5":
+        show_e5_sarah_module(name, desc)
+        return
     
     # Breadcrumb
     st.markdown(f"Category {cat_key.split('-')[0].strip()} > {name}")

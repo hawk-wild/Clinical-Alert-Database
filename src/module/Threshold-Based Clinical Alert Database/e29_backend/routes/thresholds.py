@@ -29,7 +29,10 @@ def create_threshold(payload: ThresholdCreate) -> dict:
     if not patient_groups_collection().find_one({"group_id": payload.group_id}):
         raise HTTPException(status_code=400, detail="group_id does not exist in Patient-group")
     thresholds_collection().insert_one(payload.model_dump())
-    return serialize_doc(thresholds_collection().find_one({"threshold_id": payload.threshold_id}))
+    created = thresholds_collection().find_one({"threshold_id": payload.threshold_id})
+    if not created:
+        raise HTTPException(status_code=500, detail="Threshold creation verification failed")
+    return serialize_doc(created)
 
 
 @router.put("/thresholds/{threshold_id}")
@@ -40,7 +43,10 @@ def update_threshold(threshold_id: str, payload: ThresholdCreate) -> dict:
     if not patient_groups_collection().find_one({"group_id": payload.group_id}):
         raise HTTPException(status_code=400, detail="group_id does not exist in Patient-group")
     thresholds_collection().update_one({"threshold_id": threshold_id}, {"$set": payload.model_dump()})
-    return serialize_doc(thresholds_collection().find_one({"threshold_id": payload.threshold_id}))
+    updated = thresholds_collection().find_one({"threshold_id": payload.threshold_id})
+    if not updated:
+        raise HTTPException(status_code=500, detail="Threshold update verification failed")
+    return serialize_doc(updated)
 
 
 @router.delete("/thresholds/{threshold_id}")

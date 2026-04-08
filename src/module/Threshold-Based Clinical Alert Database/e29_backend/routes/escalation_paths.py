@@ -29,7 +29,10 @@ def create_escalation_path(payload: EscalationPathCreate) -> dict:
     if not thresholds_collection().find_one({"threshold_id": payload.threshold_id}):
         raise HTTPException(status_code=400, detail="threshold_id does not exist in Threshold")
     escalation_paths_collection().insert_one(payload.model_dump())
-    return serialize_doc(escalation_paths_collection().find_one({"escalation_id": payload.escalation_id}))
+    created = escalation_paths_collection().find_one({"escalation_id": payload.escalation_id})
+    if not created:
+        raise HTTPException(status_code=500, detail="Escalation-path creation verification failed")
+    return serialize_doc(created)
 
 
 @router.put("/escalation-paths/{escalation_id}")
@@ -40,7 +43,10 @@ def update_escalation_path(escalation_id: str, payload: EscalationPathCreate) ->
     if not thresholds_collection().find_one({"threshold_id": payload.threshold_id}):
         raise HTTPException(status_code=400, detail="threshold_id does not exist in Threshold")
     escalation_paths_collection().update_one({"escalation_id": escalation_id}, {"$set": payload.model_dump()})
-    return serialize_doc(escalation_paths_collection().find_one({"escalation_id": payload.escalation_id}))
+    updated = escalation_paths_collection().find_one({"escalation_id": payload.escalation_id})
+    if not updated:
+        raise HTTPException(status_code=500, detail="Escalation-path update verification failed")
+    return serialize_doc(updated)
 
 
 @router.delete("/escalation-paths/{escalation_id}")

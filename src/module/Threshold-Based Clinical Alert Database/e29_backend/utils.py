@@ -1,7 +1,18 @@
 from datetime import datetime, timezone
+from typing import Any, overload
 
 
-def serialize_doc(doc: dict | None) -> dict | None:
+@overload
+def serialize_doc(doc: None) -> None:
+    ...
+
+
+@overload
+def serialize_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    ...
+
+
+def serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
     if not doc:
         return None
     payload = dict(doc)
@@ -9,8 +20,8 @@ def serialize_doc(doc: dict | None) -> dict | None:
     return payload
 
 
-def serialize_many(docs: list[dict]) -> list[dict]:
-    return [serialize_doc(doc) for doc in docs if doc]
+def serialize_many(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [serialize_doc(doc) for doc in docs]
 
 
 def now_utc() -> datetime:
